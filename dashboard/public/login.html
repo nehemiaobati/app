@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - p2profit-bot</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900" rel="stylesheet"/>
+</head>
+<body class="bg-slate-900 flex items-center justify-center min-h-screen" style='font-family: Inter, "Noto Sans", sans-serif;'>
+    <div class="w-full max-w-md p-8 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
+        <div id="loginContainer">
+            <h2 class="text-slate-100 text-3xl font-bold leading-tight mb-6 text-center">Login to TradeBot</h2>
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label for="loginUsername" class="block text-slate-300 text-sm font-medium mb-2">Username</label>
+                    <input type="text" id="loginUsername" name="username" required class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 focus:ring-sky-500 focus:border-sky-500"/>
+                </div>
+                <div>
+                    <label for="loginPassword" class="block text-slate-300 text-sm font-medium mb-2">Password</label>
+                    <input type="password" id="loginPassword" name="password" required class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 focus:ring-sky-500 focus:border-sky-500"/>
+                </div>
+                <button type="submit" class="w-full bg-sky-600 text-white py-2.5 rounded-lg font-semibold hover:bg-sky-700 transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-800">
+                    Sign In
+                </button>
+                <p id="loginMessage" class="text-center text-sm font-medium text-red-400 mt-4"></p>
+                <p class="text-center text-slate-400 text-sm mt-4">
+                    Don't have an account? <a href="#" id="showSignup" class="text-sky-400 hover:underline">Sign Up</a>
+                </p>
+            </form>
+        </div>
+
+        <div id="signupContainer" class="hidden">
+            <h2 class="text-slate-100 text-3xl font-bold leading-tight mb-6 text-center">Sign Up for TradeBot</h2>
+            <form id="signupForm" class="space-y-6">
+                <div>
+                    <label for="signupUsername" class="block text-slate-300 text-sm font-medium mb-2">Username</label>
+                    <input type="text" id="signupUsername" name="username" required class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 focus:ring-sky-500 focus:border-sky-500"/>
+                </div>
+                <div>
+                    <label for="signupEmail" class="block text-slate-300 text-sm font-medium mb-2">Email</label>
+                    <input type="email" id="signupEmail" name="email" required class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 focus:ring-sky-500 focus:border-sky-500"/>
+                </div>
+                <div>
+                    <label for="signupPassword" class="block text-slate-300 text-sm font-medium mb-2">Password</label>
+                    <input type="password" id="signupPassword" name="password" required class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 focus:ring-sky-500 focus:border-sky-500"/>
+                </div>
+                <button type="submit" class="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-semibold hover:bg-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800">
+                    Sign Up
+                </button>
+                <p id="signupMessage" class="text-center text-sm font-medium text-red-400 mt-4"></p>
+                <p class="text-center text-slate-400 text-sm mt-4">
+                    Already have an account? <a href="#" id="showLogin" class="text-sky-400 hover:underline">Login</a>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const loginContainer = document.getElementById('loginContainer');
+        const signupContainer = document.getElementById('signupContainer');
+        const showSignupLink = document.getElementById('showSignup');
+        const showLoginLink = document.getElementById('showLogin');
+
+        showSignupLink.addEventListener('click', function(event) {
+            event.preventDefault();
+            loginContainer.classList.add('hidden');
+            signupContainer.classList.remove('hidden');
+        });
+
+        showLoginLink.addEventListener('click', function(event) {
+            event.preventDefault();
+            signupContainer.classList.add('hidden');
+            loginContainer.classList.remove('hidden');
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            const messageElement = document.getElementById('loginMessage');
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    messageElement.textContent = data.message;
+                    messageElement.classList.remove('text-red-400');
+                    messageElement.classList.add('text-emerald-400');
+                    window.location.href = '/index.html'; // Redirect on successful login
+                } else {
+                    messageElement.textContent = data.error || 'Login failed.';
+                    messageElement.classList.remove('text-emerald-400');
+                    messageElement.classList.add('text-red-400');
+                }
+            } catch (error) {
+                console.error('Network or server error:', error);
+                messageElement.textContent = 'Could not connect to the server.';
+                messageElement.classList.remove('text-emerald-400');
+                messageElement.classList.add('text-red-400');
+            }
+        });
+
+        document.getElementById('signupForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const username = document.getElementById('signupUsername').value;
+            const email = document.getElementById('signupEmail').value;
+            const password = document.getElementById('signupPassword').value;
+            const messageElement = document.getElementById('signupMessage');
+
+            try {
+                const response = await fetch('/api/signup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    messageElement.textContent = data.message;
+                    messageElement.classList.remove('text-red-400');
+                    messageElement.classList.add('text-emerald-400');
+                    // Optionally, redirect to login or directly to dashboard
+                    // window.location.href = '/index.html';
+                    loginContainer.classList.remove('hidden');
+                    signupContainer.classList.add('hidden');
+                } else {
+                    messageElement.textContent = data.error || 'Signup failed.';
+                    messageElement.classList.remove('text-emerald-400');
+                    messageElement.classList.add('text-red-400');
+                }
+            } catch (error) {
+                console.error('Network or server error:', error);
+                messageElement.textContent = 'Could not connect to the server.';
+                messageElement.classList.remove('text-emerald-400');
+                messageElement.classList.add('text-red-400');
+            }
+        });
+    </script>
+</body>
+</html>

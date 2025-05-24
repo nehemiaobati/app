@@ -1,0 +1,9 @@
+Options -Indexes
+RewriteEngine On
+RewriteBase /
+
+# Rewrite for the API
+RewriteRule ^api/(.*)$ api.php [QSA,L]
+
+# Optional: Prevent direct access to PHP source files (if not using a strict public folder structure)
+# RewriteRule ^(src|bot|vendor|config|db|auth|controllers|models|process_manager)\.php$ - [F,L]
