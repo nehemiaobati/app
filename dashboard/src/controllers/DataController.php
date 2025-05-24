@@ -98,28 +98,24 @@ class DataController
         try {
             $pdo = get_pdo();
             // Total PnL
-            $stmtPnl = $pdo->query("SELECT SUM(realized_pnl_usdt) AS total_pnl FROM orders_log WHERE realized_pnl_usdt IS NOT NULL");
-            $totalPnl = $stmtPnl->fetchColumn();
-
-            // Trades Executed, Wins, Losses
-            $stmtTrades = $pdo->query("
+            $stmt = $pdo->query("
                 SELECT
-                    COUNT(*) AS total_trades,
+                    SUM(realized_pnl_usdt) AS total_pnl,
+                    COUNT(CASE WHEN status_reason LIKE '%FILLED%' THEN 1 ELSE NULL END) AS total_trades,
                     SUM(CASE WHEN realized_pnl_usdt > 0 THEN 1 ELSE 0 END) AS winning_trades,
-                    SUM(CASE WHEN realized_pnl_usdt < 0 THEN 1 ELSE 0 END) AS losing_trades
+                    SUM(CASE WHEN realized_pnl_usdt < 0 THEN 1 ELSE 0 END) AS losing_trades,
+                    MAX(bot_event_timestamp_utc) AS last_trade_timestamp
                 FROM orders_log
-                WHERE status_reason LIKE '%FILLED%'
             ");
-            $tradeStats = $stmtTrades->fetch();
+            $summaryData = $stmt->fetch();
 
-            $totalTrades = (int)($tradeStats['total_trades'] ?? 0);
-            $winningTrades = (int)($tradeStats['winning_trades'] ?? 0);
-            $losingTrades = (int)($tradeStats['losing_trades'] ?? 0);
+            $totalPnl = $summaryData['total_pnl'] ?? 0;
+            $totalTrades = (int)($summaryData['total_trades'] ?? 0);
+            $winningTrades = (int)($summaryData['winning_trades'] ?? 0);
+            $losingTrades = (int)($summaryData['losing_trades'] ?? 0);
+            $lastTradeTimestamp = $summaryData['last_trade_timestamp'];
+
             $winRate = $totalTrades > 0 ? ($winningTrades / $totalTrades) * 100 : 0;
-
-            // Last Trade Timestamp (from orders_log)
-            $stmtLastTrade = $pdo->query("SELECT MAX(bot_event_timestamp_utc) FROM orders_log");
-            $lastTradeTimestamp = $stmtLastTrade->fetchColumn();
             $lastTradeAgo = null;
             if ($lastTradeTimestamp) {
                 $diff = (new DateTime($lastTradeTimestamp))->diff(new DateTime('now'));

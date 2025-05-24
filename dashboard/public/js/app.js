@@ -22,7 +22,7 @@ let botConfig = {}; // To store the bot's current configuration
 
 async function loadDashboard() {
     await fetchDashboardData();
-    dashboardPollingInterval = setInterval(fetchDashboardData, 5000); // Poll every 5 seconds
+    dashboardPollingInterval = setInterval(fetchDashboardData, 5000); // Poll every 30 seconds
     setupEventListeners();
 }
 

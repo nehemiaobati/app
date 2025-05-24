@@ -26,7 +26,7 @@ $geminiModelName = getenv('GEMINI_MODEL_NAME') ?: 'gemini-2.5-flash-preview-05-2
 
 $dbHost = getenv('DB_HOST') ?: '127.0.0.1';
 $dbPort = getenv('DB_PORT') ?: '3306';
-$dbName = getenv('DB_NAME')  ?: 'server_bot';
+$dbName = getenv('DB_NAME')  ?: 'server_bot2';
 $dbUser = getenv('DB_USER') ?: 'phpmyadmin';
 $dbPassword = getenv('DB_PASSWORD') ?: '12345678';
 
