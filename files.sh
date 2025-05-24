@@ -52,3 +52,4 @@ echo 'new file' > README.md
 
 echo "Directory structure and files created successfully in $(pwd)"
 echo "Remember to populate the files with the actual code and run 'composer install' in the main project directory and the 'bot/' directory."
+#end
