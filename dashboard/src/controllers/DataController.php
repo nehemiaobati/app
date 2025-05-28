@@ -182,12 +182,12 @@ class DataController
                 $currentPositionDetails = null;
             }
 
-            // Fetch current kline price for Mark Price
-            $klineUrl = $binanceApiBaseUrl . "/fapi/v1/klines?symbol={$tradingSymbol}&interval=1m&limit=1";
-            $klineData = self::makeHttpRequest($klineUrl);
+            // Fetch historical kline data for the chart
+            $klineUrl = $binanceApiBaseUrl . "/fapi/v1/klines?symbol={$tradingSymbol}&interval=1m&limit=100"; // Fetch 100 klines for the chart
+            $historicalKlines = self::makeHttpRequest($klineUrl);
             $currentMarketPrice = null;
-            if ($klineData && isset($klineData[0][4])) { // Index 4 is Close price
-                $currentMarketPrice = (float)$klineData[0][4];
+            if ($historicalKlines && isset($historicalKlines[count($historicalKlines) - 1][4])) { // Last kline's Close price
+                $currentMarketPrice = (float)$historicalKlines[count($historicalKlines) - 1][4];
             }
 
             // If a position exists, update its markPrice and PnL if possible
@@ -201,7 +201,8 @@ class DataController
             echo json_encode([
                 'current_position_details' => $currentPositionDetails,
                 'current_market_price' => $currentMarketPrice,
-                'trading_symbol' => $tradingSymbol
+                'trading_symbol' => $tradingSymbol,
+                'historical_klines' => $historicalKlines // Include historical klines in the response
             ]);
 
         } catch (\PDOException $e) {

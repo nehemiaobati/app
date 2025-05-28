@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 require __DIR__ . '/vendor/autoload.php';
 
+use Dotenv\Dotenv;
+
+$dotenv = Dotenv::createImmutable(__DIR__ . '/../');
+$dotenv->load();
+
+$dotenv->required(['BINANCE_API_KEY', 'BINANCE_API_SECRET', 'GEMINI_API_KEY', 'GEMINI_MODEL_NAME', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']);
+
 use React\EventLoop\Loop;
 use React\EventLoop\LoopInterface;
 use Ratchet\Client\Connector as WsConnector;
@@ -18,29 +25,16 @@ use Monolog\Formatter\LineFormatter;
 use Psr\Log\LoggerInterface;
 
 // --- Environment Variable & DB Configuration Loading (for the bot itself) ---
-// These are sourced from environment variables, typically via a .env file loaded by process_manager.php
-$binanceApiKey = getenv('BINANCE_API_KEY') ?: '87d4247646329bd52942197b01f819c210eac9a22ccc3c1ae456475b59329d32';
-$binanceApiSecret = getenv('BINANCE_API_SECRET') ?: 'e6976724570ccbb50bf27922c860b19c0cf033a94e4592389b77daca3c9edb73';
-$geminiApiKey = getenv('GEMINI_API_KEY') ?: 'AIzaSyChCv_Ab9Sd0vORDG-VY6rMrhKpMThv_YA';
-$geminiModelName = getenv('GEMINI_MODEL_NAME') ?: 'gemini-2.5-flash-preview-05-20';
+$binanceApiKey = $_ENV['BINANCE_API_KEY'];
+$binanceApiSecret = $_ENV['BINANCE_API_SECRET'];
+$geminiApiKey = $_ENV['GEMINI_API_KEY'];
+$geminiModelName = $_ENV['GEMINI_MODEL_NAME'];
 
-$dbHost = getenv('DB_HOST') ?: '127.0.0.1';
-$dbPort = getenv('DB_PORT') ?: '3306';
-$dbName = getenv('DB_NAME')  ?: 'server_bot';
-$dbUser = getenv('DB_USER') ?: 'phpmyadmin';
-$dbPassword = getenv('DB_PASSWORD') ?: '12345678';
-
-// Basic validation for critical environment variables
-if (!$binanceApiKey || !$binanceApiSecret) {
-    die("Error: Binance API Key or Secret not configured in environment variables.\n");
-}
-if (!$geminiApiKey || !$geminiModelName) {
-    die("Error: Gemini API Key or Model Name not configured in environment variables.\n");
-}
-if (empty($dbHost) || empty($dbName) || empty($dbUser)) {
-    die("Error: Database configuration incomplete in environment variables.\n");
-}
-
+$dbHost = $_ENV['DB_HOST'];
+$dbPort = $_ENV['DB_PORT'];
+$dbName = $_ENV['DB_NAME'];
+$dbUser = $_ENV['DB_USER'];
+$dbPassword = $_ENV['DB_PASSWORD'];
 
 class AiTradingBotFutures
 {
@@ -1224,6 +1218,55 @@ class AiTradingBotFutures
             'active_tp_before' => $this->activeTpOrderId, 'specific_other_order_to_cancel' => $otherOrderIdToCancel
         ]);
 
+        $symbol = $this->tradingSymbol; // Capture for use in closures
+        $quantityClosed = $closedPositionDetails['quantity'] ?? 0;
+        $closeSide = $closedPositionDetails['side'] === 'LONG' ? 'SELL' : 'BUY';
+        $slOrderId = $this->activeSlOrderId;
+        $tpOrderId = $this->activeTpOrderId;
+
+        $this->getFuturesTradeHistory($this->tradingSymbol, 20)
+            ->then(function ($tradeHistory) use ($symbol, $quantityClosed, $closeSide, $slOrderId, $tpOrderId) {
+                $closingTrade = null;
+                foreach ($tradeHistory as $trade) {
+                    $isClosingTrade = false;
+                    // Check if orderId matches SL/TP order ID (if either was filled)
+                    if (($slOrderId && (string)$trade['orderId'] === $slOrderId) || ($tpOrderId && (string)$trade['orderId'] === $tpOrderId)) {
+                        $isClosingTrade = true;
+                    } elseif ($trade['reduceOnly'] && (float)$trade['qty'] == $quantityClosed && $trade['side'] === $closeSide) {
+                        $isClosingTrade = true;
+                    }
+
+                    if ($isClosingTrade) {
+                        $closingTrade = $trade;
+                        break;
+                    }
+                }
+
+                $realizedPnl = 0.0;
+                if ($closingTrade) {
+                    $realizedPnl = (float)($closingTrade['realizedPnl'] ?? 0.0);
+                    $this->logger->info("Found closing trade in history. Logging PNL.", ['orderId' => $closingTrade['orderId'], 'pnl' => $realizedPnl]);
+                } else {
+                    $this->logger->warning("Could not find closing trade in history to extract PNL.");
+                }
+
+                // Log the position close with the extracted PNL
+                $this->addOrderToLog(
+                    $closingTrade['orderId'] ?? 'N/A',
+                    'CLOSED',
+                    $closeSide,
+                    $symbol,
+                    (float)($closingTrade['price'] ?? 0),
+                    $quantityClosed,
+                    $this->marginAsset,
+                    time(),
+                    $realizedPnl
+                );
+            })
+            ->otherwise(function (\Throwable $e) {
+                $this->logger->error("Failed to get trade history for PNL extraction: " . $e->getMessage());
+            });
+
         $cancelPromises = [];
         if ($otherOrderIdToCancel && $otherOrderIdToCancel === $this->activeTpOrderId) {
              if ($this->activeTpOrderId) $cancelPromises[] = $this->cancelOrderAndLog($this->activeTpOrderId, "remaining TP during position close");
@@ -1891,6 +1934,13 @@ class AiTradingBotFutures
         return $this->makeAsyncApiRequest('GET', $signedRequestData['url'], $signedRequestData['headers'])
             ->then(function($data) use ($symbol) {
                 $this->logger->debug("Fetched recent futures trades for {$symbol}", ['count' => is_array($data) ? count($data) : 'N/A']);
+                // Ensure 'reduceOnly' is present in each trade
+                $data = array_map(function ($trade) {
+                    if (!isset($trade['reduceOnly'])) {
+                        $trade['reduceOnly'] = false; // Default value if not present
+                    }
+                    return $trade;
+                }, $data);
                 return $data;
             });
     }
@@ -1924,7 +1974,7 @@ class AiTradingBotFutures
     private function collectDataForAI(bool $isEmergency = false): PromiseInterface
     {
         $this->logger->debug("Collecting data for AI...", ['emergency' => $isEmergency, 'db_active' => (bool)$this->pdo]);
-        $historicalKlineApiLimit = 500; // Max klines per interval for API fetch
+        $historicalKlineApiLimit = 50; // Max klines per interval for API fetch
 
         // API Data Collection Promises
         $promises = [
@@ -2074,7 +2124,7 @@ class AiTradingBotFutures
         // Define how many recent klines to include per interval in the prompt text.
         // IMPORTANT: Increasing this significantly will increase prompt token count, API costs,
         // and potentially hit the AI model's input token limits.
-        $PROMPT_KLINES_LIMIT = 50; // You can adjust this value (e.g., to 100, 200, etc.)
+        $PROMPT_KLINES_LIMIT = 20; // You can adjust this value (e.g., to 100, 200, etc.)
 
         // 1. Summarize complex data for the text prompt
         $summarizedDataForPromptText = [
@@ -2207,10 +2257,10 @@ class AiTradingBotFutures
         $promptText .= "\nProvide ONLY the JSON object for your decision.";
 
         $generationConfig = [
-            'temperature' => 0.4, // A bit higher for reasoning but still consistent
+            'temperature' => 1, // A bit higher for reasoning but still consistent
             'topK' => 1,
             'topP' => 0.95,
-            'maxOutputTokens' => 12072, // Increased for potentially larger updated_directives
+            'maxOutputTokens' => 6072, // Increased for potentially larger updated_directives
             'responseMimeType' => 'application/json', // Request JSON output directly
         ];
 

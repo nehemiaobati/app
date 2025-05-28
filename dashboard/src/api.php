@@ -1,5 +1,5 @@
 <?php
-// src/api.php
+// public/api.php
 session_start();
 
 // Set CORS headers for local development (adjust for production)
@@ -15,12 +15,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/auth.php';
-require_once __DIR__ . '/controllers/AuthController.php';
-require_once __DIR__ . '/controllers/BotController.php';
-require_once __DIR__ . '/controllers/DataController.php';
+require_once __DIR__ . '/../src/config.php';
+require_once __DIR__ . '/../src/db.php';
+require_once __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/controllers/AuthController.php';
+require_once __DIR__ . '/../src/controllers/BotController.php';
+require_once __DIR__ . '/../src/controllers/DataController.php';
 
 // Parse the request path
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -33,7 +33,7 @@ $action = $pathParts[1] ?? null; // For nested routes like /bot/status
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Public endpoints (no authentication required)
-$publicEndpoints = ['login', 'logout'];
+$publicEndpoints = ['login', 'logout', 'signup'];
 
 // Authenticate all other requests
 if (!in_array($endpoint, $publicEndpoints)) {
@@ -49,6 +49,10 @@ try {
         case 'logout':
             if ($method === 'POST') AuthController::logout();
             else http_response_code(405);
+            break;
+        case 'signup':
+            if ($method === 'POST') AuthController::signup();
+            else http_response_code(405); // Method Not Allowed
             break;
         case 'bot':
             switch ($action) {
@@ -98,6 +102,19 @@ try {
                     http_response_code(404);
                     echo json_encode(['error' => 'Data endpoint not found.']);
                     break;
+            }
+            break;
+        case 'user':
+            if ($method === 'GET') {
+                $user = Auth::getLoggedInUser();
+                if ($user) {
+                    echo json_encode(['username' => $user['username']]);
+                } else {
+                    http_response_code(401);
+                    echo json_encode(['error' => 'Unauthorized: No user logged in.']);
+                }
+            } else {
+                http_response_code(405); // Method Not Allowed
             }
             break;
         default:

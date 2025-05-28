@@ -9,7 +9,7 @@
 <title>Stitch Design - p2profit-bot Dashboard</title>
 <link href="data:image/x-icon;base64," rel="icon" type="image/x-icon"/>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Chart.js library -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
 </head>
 <body class="bg-slate-900">
 <div class="relative flex size-full min-h-screen flex-col bg-[#101a23] dark group/design-root overflow-x-hidden" style='font-family: Inter, "Noto Sans", sans-serif;'>
@@ -26,10 +26,10 @@
 </div>
 <div class="hidden md:flex flex-1 justify-end gap-6">
 <nav class="flex items-center gap-6">
-<a class="text-slate-300 hover:text-sky-400 text-sm font-medium leading-normal transition-colors" href="#">Dashboard</a>
-<a class="text-slate-300 hover:text-sky-400 text-sm font-medium leading-normal transition-colors" href="#">Strategies</a>
-<a class="text-slate-300 hover:text-sky-400 text-sm font-medium leading-normal transition-colors" href="#">Backtest</a>
-<a class="text-slate-300 hover:text-sky-400 text-sm font-medium leading-normal transition-colors" href="#">Live</a>
+
+
+
+
 </nav>
 <div class="flex items-center gap-3">
 <button class="flex items-center justify-center rounded-full h-10 w-10 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-sky-400 transition-colors">
@@ -125,9 +125,11 @@
 </section>
 
 <section class="p-4 md:p-6" id="currentPositionSection">
-<!-- Current Position Details will be injected here by JS -->
     <h2 class="text-slate-100 text-xl md:text-2xl font-semibold leading-tight tracking-[-0.015em] mb-4">Current Position</h2>
-    <div class="bg-slate-800 rounded-lg p-6 text-center text-slate-400">
+    <div class="bg-slate-800 rounded-lg p-6 shadow-lg border border-slate-700 mb-4">
+        <canvas id="miniPriceChart" class="w-full h-48"></canvas>
+    </div>
+    <div id="positionDetailsContainer" class="bg-slate-800 rounded-lg p-6 text-center text-slate-400">
         Loading position data...
     </div>
 </section>
@@ -162,7 +164,7 @@
 <h2 class="text-slate-100 text-xl md:text-2xl font-semibold leading-tight tracking-[-0.015em] mb-4">Recent Trades</h2>
 <div class="overflow-x-auto @container">
 <div class="rounded-lg border border-slate-700 bg-slate-800 shadow">
-<table class="min-w-full">
+<table class="">
 <thead class="bg-slate-700/50">
 <tr>
 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Symbol</th>

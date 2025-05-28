@@ -1,17 +1,37 @@
 // public/js/charts.js
 function renderMiniChart(canvasId, klineData, tradingSymbol) {
-    const ctx = document.getElementById(canvasId);
-    if (!ctx) {
+    const canvasElement = document.getElementById(canvasId);
+    if (!canvasElement) {
         console.error(`Canvas element with ID '${canvasId}' not found.`);
+        // Provide visual feedback if canvas is not found
+        const parentDiv = document.querySelector(`#${canvasId}`).parentElement;
+        if (parentDiv) {
+            parentDiv.innerHTML = `<div class="text-red-400 text-center py-4">Error: Chart canvas element not found!</div>`;
+        }
         return;
     }
 
     // Filter for only 'close' prices and labels (timestamps)
-    const labels = klineData.map(k => new Date(k.openTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    const data = klineData.map(k => parseFloat(k.close));
+    // klineData is an array of arrays: [openTime, open, high, low, close, ...]
+    const labels = klineData.map(k => new Date(k[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    const data = klineData.map(k => parseFloat(k[4]));
+
+    //console.log('renderMiniChart: klineData received:', klineData);
+    //console.log('renderMiniChart: Processed labels:', labels);
+    //console.log('renderMiniChart: Processed data:', data);
+
+    if (data.length === 0 || labels.length === 0) {
+        console.warn('renderMiniChart: No valid data or labels to render chart.');
+        // Provide visual feedback if data is empty
+        const parentDiv = canvasElement.parentElement;
+        if (parentDiv) {
+            parentDiv.innerHTML = `<div class="text-yellow-400 text-center py-4">No chart data available.</div>`;
+        }
+        return;
+    }
 
     // Determine color based on last price change
-    const lastPrice = data[data.length - 1];
+    const lastPrice = data[data.length - 1]; // data.length is guaranteed > 0 here
     const firstPrice = data[0];
     const lineColor = lastPrice >= firstPrice ? '#34D399' : '#EF4444'; // Green or Red
 
@@ -19,7 +39,7 @@ function renderMiniChart(canvasId, klineData, tradingSymbol) {
         window.miniChartInstance.destroy(); // Destroy previous instance if it exists
     }
 
-    window.miniChartInstance = new Chart(ctx, {
+    window.miniChartInstance = new Chart(canvasElement, { // Use canvasElement instead of ctx
         type: 'line',
         data: {
             labels: labels,
@@ -36,41 +56,14 @@ function renderMiniChart(canvasId, klineData, tradingSymbol) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            // Removed all other complex options for simplification
             plugins: {
                 legend: { display: false },
-                tooltip: {
-                    mode: 'index',
-                    intersect: false,
-                    callbacks: {
-                        title: (tooltipItems) => {
-                            return `Time: ${tooltipItems[0].label}`;
-                        },
-                        label: (tooltipItem) => {
-                            return `Close: ${tooltipItem.raw}`;
-                        }
-                    }
-                },
+                tooltip: { enabled: false } // Disable tooltips for simplicity
             },
             scales: {
-                x: {
-                    display: false, // Hide x-axis
-                    grid: { display: false },
-                    ticks: { display: false }
-                },
-                y: {
-                    display: false, // Hide y-axis
-                    grid: { display: false },
-                    ticks: { display: false }
-                }
-            },
-            elements: {
-                line: {
-                    borderJoinStyle: 'round'
-                }
-            },
-            hover: {
-                mode: 'nearest',
-                intersect: true
+                x: { display: false },
+                y: { display: false }
             }
         }
     });

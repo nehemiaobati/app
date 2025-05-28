@@ -227,13 +227,18 @@ function updateCurrentPositionUI(positionData) {
     // For this to work, you'd need DataController.getCurrentPosition to also fetch recent klines.
     // For now, we'll just show the market price.
     // If you integrate a live price stream or fetch klines for the chart, this part updates.
-    // Example: if (positionData.historical_klines && positionData.trading_symbol) {
-    //     renderMiniChart('miniPriceChart', positionData.historical_klines, positionData.trading_symbol);
-    // }
+    if (positionData.historical_klines && positionData.trading_symbol) {
+        renderMiniChart('miniPriceChart', positionData.historical_klines, positionData.trading_symbol);
+    }
+
+    const positionDetailsContainer = document.getElementById('positionDetailsContainer');
+
+    if (positionData.historical_klines && positionData.trading_symbol) {
+        renderMiniChart('miniPriceChart', positionData.historical_klines, positionData.trading_symbol);
+    }
 
     if (!positionData.current_position_details) {
-        positionSection.innerHTML = `
-            <h2 class="text-slate-100 text-xl md:text-2xl font-semibold leading-tight tracking-[-0.015em] mb-4">Current Position</h2>
+        positionDetailsContainer.innerHTML = `
             <div class="bg-slate-800 rounded-lg p-6 text-center text-slate-400">
                 No active position.
             </div>
@@ -246,17 +251,13 @@ function updateCurrentPositionUI(positionData) {
     const pnlClass = pos.unrealizedPnl > 0 ? 'text-emerald-400' : (pos.unrealizedPnl < 0 ? 'text-red-400' : 'text-slate-100');
     const sideClass = pos.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400';
 
-    // Assume current bot status is passed or fetched separately to check for missing protective orders
-    // For simplicity, let's assume if SL/TP are null, they're missing
-    const isMissingSL = !pos.activeSlOrderId; // Bot's internal activeSlOrderId
-    const isMissingTP = !pos.activeTpOrderId; // Bot's internal activeTpOrderId
+    const isMissingSL = !pos.activeSlOrderId;
+    const isMissingTP = !pos.activeTpOrderId;
     const criticalAlertHidden = !isMissingSL && !isMissingTP;
     document.getElementById('criticalAlertContainer').classList.toggle('hidden', criticalAlertHidden);
     document.getElementById('criticalAlertMessage').textContent = 'CRITICAL: Position open without ' + (isMissingSL && isMissingTP ? 'SL and TP orders!' : (isMissingSL ? 'SL order!' : 'TP order!'));
 
-
-    positionSection.innerHTML = `
-        <h2 class="text-slate-100 text-xl md:text-2xl font-semibold leading-tight tracking-[-0.015em] mb-4">Current Position</h2>
+    positionDetailsContainer.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-800 rounded-lg p-6 shadow-lg border border-slate-700">
             <div>
                 <p class="text-slate-300 text-base font-medium">Symbol</p>
