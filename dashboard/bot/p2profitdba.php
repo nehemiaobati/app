@@ -1974,7 +1974,7 @@ class AiTradingBotFutures
     private function collectDataForAI(bool $isEmergency = false): PromiseInterface
     {
         $this->logger->debug("Collecting data for AI...", ['emergency' => $isEmergency, 'db_active' => (bool)$this->pdo]);
-        $historicalKlineApiLimit = 50; // Max klines per interval for API fetch
+        $historicalKlineApiLimit = 20; // Max klines per interval for API fetch
 
         // API Data Collection Promises
         $promises = [
