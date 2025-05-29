@@ -2124,7 +2124,7 @@ class AiTradingBotFutures
         // Define how many recent klines to include per interval in the prompt text.
         // IMPORTANT: Increasing this significantly will increase prompt token count, API costs,
         // and potentially hit the AI model's input token limits.
-        $PROMPT_KLINES_LIMIT = 20; // You can adjust this value (e.g., to 100, 200, etc.)
+        $PROMPT_KLINES_LIMIT = 10; // You can adjust this value (e.g., to 100, 200, etc.)
 
         // 1. Summarize complex data for the text prompt
         $summarizedDataForPromptText = [
@@ -2260,7 +2260,7 @@ class AiTradingBotFutures
             'temperature' => 1, // A bit higher for reasoning but still consistent
             'topK' => 1,
             'topP' => 0.95,
-            'maxOutputTokens' => 6072, // Increased for potentially larger updated_directives
+            'maxOutputTokens' => 8072, // Increased for potentially larger updated_directives
             'responseMimeType' => 'application/json', // Request JSON output directly
         ];
 

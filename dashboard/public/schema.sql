@@ -60,6 +60,7 @@ CREATE TABLE `bot_configurations` (
   `take_profit_target_usdt` decimal(20,8) NOT NULL DEFAULT '0.00000000',
   `pending_entry_order_cancel_timeout_seconds` int NOT NULL DEFAULT '180',
   `is_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'Only one config can be active per symbol for simple setup',
+  `profit_check_interval_seconds` int NOT NULL DEFAULT '300',
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_by_user_id` int DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

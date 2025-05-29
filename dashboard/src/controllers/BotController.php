@@ -93,7 +93,7 @@ class BotController
             'name', 'symbol', 'kline_interval', 'margin_asset',
             'default_leverage', 'order_check_interval_seconds', 'ai_update_interval_seconds',
             'initial_margin_target_usdt', 'take_profit_target_usdt', 'pending_entry_order_cancel_timeout_seconds',
-            'use_testnet'
+            'use_testnet', 'profit_check_interval_seconds'
         ];
         $updateFields = [];
         $params = [];

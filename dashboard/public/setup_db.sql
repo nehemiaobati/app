@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `bot_configurations` (
   `initial_margin_target_usdt` decimal(20,8) NOT NULL DEFAULT 10.50000000,
   `take_profit_target_usdt` decimal(20,8) NOT NULL DEFAULT 0.00000000,
   `pending_entry_order_cancel_timeout_seconds` int(11) NOT NULL DEFAULT 180,
+  `profit_check_interval_seconds` INT NOT NULL DEFAULT 60,
   `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT 'Only one config can be active per symbol for simple setup',
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `created_by_user_id` int(11) DEFAULT NULL
@@ -227,7 +228,7 @@ ALTER TABLE `users`
 INSERT IGNORE INTO users (username, password_hash) VALUES ('testuser', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/lK.'); -- password is 'password'
 
 -- Insert a default bot configuration (for testing)
-INSERT IGNORE INTO bot_configurations (id, name, symbol, is_active) VALUES (1, 'Default Bot Config', 'BTCUSDT', TRUE);
+INSERT IGNORE INTO bot_configurations (id, name, symbol, is_active, profit_check_interval_seconds) VALUES (1, 'Default Bot Config', 'BTCUSDT', TRUE, 60);
 
 -- Insert a default runtime status for the default bot config
 INSERT IGNORE INTO bot_runtime_status (id, bot_config_id, status, current_position_details_json) VALUES (1, 1, 'stopped', NULL);

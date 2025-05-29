@@ -317,6 +317,7 @@ function updateBotConfigForm(config) {
     document.getElementById('initialMarginTargetInput').value = parseFloat(config.initial_margin_target_usdt).toFixed(2);
     document.getElementById('takeProfitTargetInput').value = parseFloat(config.take_profit_target_usdt).toFixed(2);
     document.getElementById('pendingOrderTimeoutInput').value = config.pending_entry_order_cancel_timeout_seconds;
+    document.getElementById('profitCheckIntervalInput').value = config.profit_check_interval_seconds;
 }
 
 function setupEventListeners() {
@@ -364,7 +365,8 @@ function setupEventListeners() {
             use_testnet: form.useTestnetInput.checked,
             initial_margin_target_usdt: parseFloat(form.initialMarginTargetInput.value),
             take_profit_target_usdt: parseFloat(form.takeProfitTargetInput.value),
-            pending_entry_order_cancel_timeout_seconds: parseInt(form.pendingOrderTimeoutInput.value)
+            pending_entry_order_cancel_timeout_seconds: parseInt(form.pendingOrderTimeoutInput.value),
+            profit_check_interval_seconds: parseInt(form.profitCheckIntervalInput.value)
         };
 
         try {
