@@ -283,6 +283,7 @@ class AiTradingBotFutures
               `quantity_involved` DECIMAL(20, 8) NULL,
               `margin_asset` VARCHAR(10) NULL,
               `realized_pnl_usdt` DECIMAL(20, 8) NULL,
+              `commission_usdt` DECIMAL(20, 8) NULL,
               `created_at_db` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
               INDEX `idx_symbol_timestamp` (`symbol`, `bot_event_timestamp_utc`),
               INDEX `idx_order_id_binance` (`order_id_binance`)
@@ -504,14 +505,14 @@ class AiTradingBotFutures
         }
     }
 
-    private function logOrderToDb(string $orderId, string $status, string $side, string $assetPair, ?float $price, ?float $quantity, ?string $marginAsset, int $timestamp, ?float $realizedPnl): bool
+    private function logOrderToDb(string $orderId, string $status, string $side, string $assetPair, ?float $price, ?float $quantity, ?string $marginAsset, int $timestamp, ?float $realizedPnl, ?float $commissionUsdt): bool
     {
         if (!$this->pdo) {
             $this->logger->warning("DB not connected. Cannot log order to DB.", compact('orderId', 'status'));
             return false;
         }
-        $sql = "INSERT INTO orders_log (order_id_binance, bot_event_timestamp_utc, symbol, side, status_reason, price_point, quantity_involved, margin_asset, realized_pnl_usdt)
-                VALUES (:order_id_binance, :bot_event_timestamp_utc, :symbol, :side, :status_reason, :price_point, :quantity_involved, :margin_asset, :realized_pnl_usdt)";
+        $sql = "INSERT INTO orders_log (order_id_binance, bot_event_timestamp_utc, symbol, side, status_reason, price_point, quantity_involved, margin_asset, realized_pnl_usdt, commission_usdt)
+                VALUES (:order_id_binance, :bot_event_timestamp_utc, :symbol, :side, :status_reason, :price_point, :quantity_involved, :margin_asset, :realized_pnl_usdt, :commission_usdt)";
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([
@@ -519,7 +520,8 @@ class AiTradingBotFutures
                 ':bot_event_timestamp_utc' => gmdate('Y-m-d H:i:s', $timestamp), // Store in UTC
                 ':symbol' => $assetPair, ':side' => $side, ':status_reason' => $status,
                 ':price_point' => $price, ':quantity_involved' => $quantity,
-                ':margin_asset' => $marginAsset, ':realized_pnl_usdt' => $realizedPnl
+                ':margin_asset' => $marginAsset, ':realized_pnl_usdt' => $realizedPnl,
+                ':commission_usdt' => $commissionUsdt
             ]);
         } catch (\PDOException $e) {
             $this->logger->error("Failed to log order to DB: " . $e->getMessage(), compact('orderId', 'status'));
@@ -924,76 +926,87 @@ class AiTradingBotFutures
                 $orderStatus = $order['X']; // NEW, PARTIALLY_FILLED, FILLED, CANCELED, EXPIRED, etc.
                 $executionType = $order['x']; // NEW, CANCELED, TRADE, EXPIRED etc.
 
-                // --- Handling Active Entry Order ---
-                if ($orderId === $this->activeEntryOrderId) {
-                    if ($orderStatus === 'FILLED') {
-                        $this->logger->info("Entry order FULLY FILLED: {$this->activeEntryOrderId}. Placing SL/TP orders.");
-                        $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['ap'] ?? $order['p']), (float)$order['z'], $this->marginAsset, time(), (float)($order['rp'] ?? 0));
-                        $this->activeEntryOrderId = null; // Clear pending entry state
-                        $this->activeEntryOrderTimestamp = null;
-                        $this->isMissingProtectiveOrder = false; // Assume SL/TP will be placed now
-                        $this->placeSlAndTpOrders(); // Initiate SL/TP placement
-                    } elseif ($orderStatus === 'PARTIALLY_FILLED') {
-                        $this->logger->info("Entry order PARTIALLY FILLED: {$this->activeEntryOrderId}. Waiting for full fill or timeout.", ['filled_qty' => $order['z'], 'total_qty' => $order['q']]);
-                        $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['ap'] ?? $order['p']), (float)($order['l'] ?? $order['z']), $this->marginAsset, time(), (float)($order['rp'] ?? 0)); // Log fill price/qty
-                    } elseif (in_array($orderStatus, ['CANCELED', 'EXPIRED', 'REJECTED', 'PENDING_CANCEL'])) {
-                        $this->logger->warning("Active entry order {$this->activeEntryOrderId} ended without fill via WS: {$orderStatus}. Resetting trade state.");
-                        $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['p'] ?? 0), (float)$order['q'], $this->marginAsset, time(), (float)($order['rp'] ?? 0));
-                        $this->resetTradeState(); // Full reset as entry failed
-                        $this->lastAIDecisionResult = ['status' => 'INFO', 'message' => "Entry order {$orderId} ended without full fill: {$orderStatus}.", 'decision' => null];
+                // Extract commission details
+                $commission = (float)($order['n'] ?? 0); // 'n' is commission amount
+                $commissionAsset = $order['N'] ?? null; // 'N' is commission asset name
+
+                // Asynchronously get USDT equivalent of commission
+                $this->getUsdtEquivalent((string)$commissionAsset, $commission)->then(function ($commissionUsdt) use ($order, $orderId, $orderStatus, $executionType) {
+                    // --- Handling Active Entry Order ---
+                    if ($orderId === $this->activeEntryOrderId) {
+                        if ($orderStatus === 'FILLED') {
+                            $this->logger->info("Entry order FULLY FILLED: {$this->activeEntryOrderId}. Placing SL/TP orders.");
+                            $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['ap'] ?? $order['p']), (float)$order['z'], $this->marginAsset, time(), (float)($order['rp'] ?? 0), $commissionUsdt);
+                            $this->activeEntryOrderId = null; // Clear pending entry state
+                            $this->activeEntryOrderTimestamp = null;
+                            $this->isMissingProtectiveOrder = false; // Assume SL/TP will be placed now
+                            $this->placeSlAndTpOrders(); // Initiate SL/TP placement
+                        } elseif ($orderStatus === 'PARTIALLY_FILLED') {
+                            $this->logger->info("Entry order PARTIALLY FILLED: {$this->activeEntryOrderId}. Waiting for full fill or timeout.", ['filled_qty' => $order['z'], 'total_qty' => $order['q']]);
+                            $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['ap'] ?? $order['p']), (float)($order['l'] ?? $order['z']), $this->marginAsset, time(), (float)($order['rp'] ?? 0), $commissionUsdt); // Log fill price/qty
+                        } elseif (in_array($orderStatus, ['CANCELED', 'EXPIRED', 'REJECTED', 'PENDING_CANCEL'])) {
+                            $this->logger->warning("Active entry order {$this->activeEntryOrderId} ended without fill via WS: {$orderStatus}. Resetting trade state.");
+                            $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['p'] ?? 0), (float)$order['q'], $this->marginAsset, time(), (float)($order['rp'] ?? 0), $commissionUsdt);
+                            $this->resetTradeState(); // Full reset as entry failed
+                            $this->lastAIDecisionResult = ['status' => 'INFO', 'message' => "Entry order {$orderId} ended without full fill: {$orderStatus}.", 'decision' => null];
+                        }
                     }
-                }
-                // --- Handling Active SL/TP Orders ---
-                elseif ($orderId === $this->activeSlOrderId || $orderId === $this->activeTpOrderId) {
-                    if ($orderStatus === 'FILLED' || ($orderStatus == 'PARTIALLY_FILLED' && $executionType == 'TRADE')) { // Use Execution Type TRADE to confirm fill
-                         $isSlFill = ($orderId === $this->activeSlOrderId);
-                         $logSide = $order['S']; // Side of the SL/TP order itself (e.g., SELL for closing LONG)
-                         $pnl = (float)($order['rp'] ?? 0); // Realized PnL from the fill
+                    // --- Handling Active SL/TP Orders ---
+                    elseif ($orderId === $this->activeSlOrderId || $orderId === $this->activeTpOrderId) {
+                        if ($orderStatus === 'FILLED' || ($orderStatus == 'PARTIALLY_FILLED' && $executionType == 'TRADE')) { // Use Execution Type TRADE to confirm fill
+                            $isSlFill = ($orderId === $this->activeSlOrderId);
+                            $logSide = $order['S']; // Side of the SL/TP order itself (e.g., SELL for closing LONG)
+                            $pnl = (float)($order['rp'] ?? 0); // Realized PnL from the fill
 
-                         $this->logger->info("Protective ({$order['ot']}) order {$orderId} filled (or partially). Position closing.", ['realized_pnl' => $pnl, 'order_status' => $orderStatus]);
-                         $this->addOrderToLog(
-                             $orderId, $orderStatus . ($executionType == 'TRADE' ? '_TRADE' : ''), $logSide,
-                             $this->tradingSymbol, (float)($order['ap'] > 0 ? $order['ap'] : ($order['sp'] ?? 0)),
-                             (float)($order['l'] ?? $order['z']), $this->marginAsset, time(), $pnl
-                         );
+                            $this->logger->info("Protective ({$order['ot']}) order {$orderId} filled (or partially). Position closing.", ['realized_pnl' => $pnl, 'order_status' => $orderStatus]);
+                            $this->addOrderToLog(
+                                $orderId, $orderStatus . ($executionType == 'TRADE' ? '_TRADE' : ''), $logSide,
+                                $this->tradingSymbol, (float)($order['ap'] > 0 ? $order['ap'] : ($order['sp'] ?? 0)),
+                                (float)($order['l'] ?? $order['z']), $this->marginAsset, time(), $pnl, $commissionUsdt
+                            );
 
-                         // If fully FILLED, proactively clear the filled order ID and cancel the other protective order.
-                         if ($orderStatus === 'FILLED') {
-                            $otherOrderId = null;
-                            if ($isSlFill) { $this->activeSlOrderId = null; $otherOrderId = $this->activeTpOrderId; }
-                            else { $this->activeTpOrderId = null; $otherOrderId = $this->activeSlOrderId; }
-                            if ($otherOrderId) $this->cancelOrderAndLog($otherOrderId, "remaining SL/TP after primary closure fill");
-                            $this->lastAIDecisionResult = ['status' => 'INFO', 'message' => "Position closed by " . ($isSlFill ? "SL" : "TP") . " order {$orderId}.", 'decision' => null];
-                         }
+                            // If fully FILLED, proactively clear the filled order ID and cancel the other protective order.
+                            if ($orderStatus === 'FILLED') {
+                                $otherOrderId = null;
+                                if ($isSlFill) { $this->activeSlOrderId = null; $otherOrderId = $this->activeTpOrderId; }
+                                else { $this->activeTpOrderId = null; $otherOrderId = $this->activeSlOrderId; }
+                                if ($otherOrderId) $this->cancelOrderAndLog($otherOrderId, "remaining SL/TP after primary closure fill");
+                                $this->lastAIDecisionResult = ['status' => 'INFO', 'message' => "Position closed by " . ($isSlFill ? "SL" : "TP") . " order {$orderId}.", 'decision' => null];
+                            }
 
-                    } elseif (in_array($orderStatus, ['CANCELED', 'EXPIRED', 'REJECTED', 'PENDING_CANCEL'])) {
-                         $this->logger->warning("SL/TP order {$orderId} ended without fill: {$orderStatus}. Possible external cancellation or issue.");
-                         if ($orderId === $this->activeSlOrderId) $this->activeSlOrderId = null;
-                         if ($orderId === $this->activeTpOrderId) $this->activeTpOrderId = null;
-                         $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['sp'] ?? 0), (float)$order['q'], $this->marginAsset, time(), 0.0);
+                        } elseif (in_array($orderStatus, ['CANCELED', 'EXPIRED', 'REJECTED', 'PENDING_CANCEL'])) {
+                            $this->logger->warning("SL/TP order {$orderId} ended without fill: {$orderStatus}. Possible external cancellation or issue.");
+                            if ($orderId === $this->activeSlOrderId) $this->activeSlOrderId = null;
+                            if ($orderId === $this->activeTpOrderId) $this->activeTpOrderId = null;
+                            $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['sp'] ?? 0), (float)$order['q'], $this->marginAsset, time(), 0.0, $commissionUsdt);
 
-                         // Check if position still exists and is now unprotected
-                         if ($this->currentPositionDetails && !$this->activeSlOrderId && !$this->activeTpOrderId) {
-                              $this->logger->critical("Position open but BOTH SL/TP orders are now gone unexpectedly. Flagging critical state.");
-                              $this->isMissingProtectiveOrder = true;
-                              $this->lastAIDecisionResult = ['status' => 'CRITICAL', 'message' => "Position unprotected: SL/TP order {$orderId} ended with status {$orderStatus}.", 'decision' => null];
-                              $this->triggerAIUpdate(true); // Trigger emergency AI consultation
-                         } elseif ($this->currentPositionDetails && (!$this->activeSlOrderId || !$this->activeTpOrderId)) {
-                             $this->logger->warning("Position open but ONE SL/TP order is now gone unexpectedly. Flagging potentially unsafe state.");
-                              $this->isMissingProtectiveOrder = true; // Still unsafe
-                              $this->lastAIDecisionResult = ['status' => 'WARN', 'message' => "Position missing one protective order: {$orderId} ended with status {$orderStatus}.", 'decision' => null];
-                              $this->triggerAIUpdate(true); // Trigger emergency AI consultation
-                         }
+                            // Check if position still exists and is now unprotected
+                            if ($this->currentPositionDetails && !$this->activeSlOrderId && !$this->activeTpOrderId) {
+                                $this->logger->critical("Position open but BOTH SL/TP orders are now gone unexpectedly. Flagging critical state.");
+                                $this->isMissingProtectiveOrder = true;
+                                $this->lastAIDecisionResult = ['status' => 'CRITICAL', 'message' => "Position unprotected: SL/TP order {$orderId} ended with status {$orderStatus}.", 'decision' => null];
+                                $this->triggerAIUpdate(true); // Trigger emergency AI consultation
+                            } elseif ($this->currentPositionDetails && (!$this->activeSlOrderId || !$this->activeTpOrderId)) {
+                                $this->logger->warning("Position open but ONE SL/TP order is now gone unexpectedly. Flagging potentially unsafe state.");
+                                $this->isMissingProtectiveOrder = true; // Still unsafe
+                                $this->lastAIDecisionResult = ['status' => 'WARN', 'message' => "Position missing one protective order: {$orderId} ended with status {$orderStatus}.", 'decision' => null];
+                                $this->triggerAIUpdate(true); // Trigger emergency AI consultation
+                            }
+                        }
                     }
-                }
-                // --- Handling Market Orders (e.g., from profit-taking or AI close) ---
-                elseif (in_array($order['ot'], ['MARKET']) && ($order['R'] ?? false)) { // Check if original type was MARKET and it was ReduceOnly
-                    if ($orderStatus === 'FILLED') {
-                        $pnl = (float)($order['rp'] ?? 0);
-                        $this->logger->info("Reduce-Only Market Order {$orderId} filled.", ['side' => $order['S'], 'avg_fill_price' => $order['ap'], 'pnl' => $pnl]);
-                        $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)$order['ap'], (float)$order['z'], $this->marginAsset, time(), $pnl);
+                    // --- Handling Market Orders (e.g., from profit-taking or AI close) ---
+                    elseif (in_array($order['ot'], ['MARKET']) && ($order['R'] ?? false)) { // Check if original type was MARKET and it was ReduceOnly
+                        if ($orderStatus === 'FILLED') {
+                            $pnl = (float)($order['rp'] ?? 0);
+                            $this->logger->info("Reduce-Only Market Order {$orderId} filled.", ['side' => $order['S'], 'avg_fill_price' => $order['ap'], 'pnl' => $pnl]);
+                            $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)$order['ap'], (float)$order['z'], $this->marginAsset, time(), $pnl, $commissionUsdt);
+                        }
                     }
-                }
+                })->otherwise(function (\Throwable $e) use ($orderId) {
+                    $this->logger->error("Failed to process commission for order {$orderId}: " . $e->getMessage());
+                    // Log order without commission if conversion fails
+                    $this->addOrderToLog($orderId, $orderStatus, $order['S'], $this->tradingSymbol, (float)($order['ap'] ?? $order['p']), (float)$order['z'], $this->marginAsset, time(), (float)($order['rp'] ?? 0), 0.0);
+                });
 
                 break; // End ORDER_TRADE_UPDATE
 
@@ -1335,15 +1348,17 @@ class AiTradingBotFutures
     }
 
     // Adds an entry to the recent order log (now primarily sends to DB)
-    private function addOrderToLog(string $orderId, string $status, string $side, string $assetPair, ?float $price, ?float $quantity, ?string $marginAsset, int $timestamp, ?float $realizedPnl): void
+    private function addOrderToLog(string $orderId, string $status, string $side, string $assetPair, ?float $price, ?float $quantity, ?string $marginAsset, int $timestamp, ?float $realizedPnl, ?float $commissionUsdt = 0.0): void
     {
         $logEntry = [ // Log to console for immediate visibility
             'orderId' => $orderId, 'status' => $status, 'side' => $side, 'assetPair' => $assetPair,
             'price' => $price, 'quantity' => $quantity, 'marginAsset' => $marginAsset,
-            'timestamp_iso' => gmdate('Y-m-d H:i:s', $timestamp) . ' UTC', 'realizedPnl' => $realizedPnl ?? 0.0,
+            'timestamp_iso' => gmdate('Y-m-d H:i:s', $timestamp) . ' UTC',
+            'realizedPnl' => $realizedPnl ?? 0.0,
+            'commissionUsdt' => $commissionUsdt,
         ];
         $this->logger->info('Trade/Order outcome logged:', $logEntry);
-        $this->logOrderToDb($orderId, $status, $side, $assetPair, $price, $quantity, $marginAsset, $timestamp, $realizedPnl);
+        $this->logOrderToDb($orderId, $status, $side, $assetPair, $price, $quantity, $marginAsset, $timestamp, $realizedPnl, $commissionUsdt);
     }
 
     // --- Core Trading Actions Triggered by AI ---
@@ -1570,6 +1585,30 @@ class AiTradingBotFutures
         return ['url' => $url, 'headers' => ['X-MBX-APIKEY' => $this->binanceApiKey], 'postData' => $body];
     }
 
+    // Helper to convert any asset amount to its USDT equivalent
+    private function getUsdtEquivalent(string $asset, float $amount): PromiseInterface
+    {
+        if (strtoupper($asset) === 'USDT') {
+            return \React\Promise\resolve($amount);
+        }
+
+        $symbol = strtoupper($asset) . 'USDT';
+        // Attempt to get the current price of the asset against USDT
+        return $this->getLatestKlineClosePrice($symbol, '1m') // Use 1-minute kline for recent price
+            ->then(function ($klineData) use ($amount, $symbol) {
+                $price = (float)($klineData['price'] ?? 0);
+                if ($price <= 0) {
+                    $this->logger->warning("Could not get valid price for {$symbol} to convert commission. Assuming 0 USDT commission.", ['kline_data' => $klineData]);
+                    return 0.0;
+                }
+                return $amount * $price;
+            })
+            ->otherwise(function (\Throwable $e) use ($asset, $amount) {
+                $this->logger->error("Failed to convert commission asset {$asset} to USDT. Assuming 0 USDT commission.", ['amount' => $amount, 'error' => $e->getMessage()]);
+                return 0.0; // Return 0 if conversion fails
+            });
+    }
+
     // Makes async HTTP request using ReactPHP Browser
     private function makeAsyncApiRequest(string $method, string $url, array $headers = [], ?string $body = null, bool $isPublic = false): PromiseInterface
     {
@@ -1757,6 +1796,23 @@ class AiTradingBotFutures
                      $this->logger->warning("Leverage set response discrepancy for {$symbol}.", ['requested' => $leverage, 'responded' => $responseLeverage, 'message' => $responseMsg]);
                  }
                  return $data;
+            });
+    }
+
+    // New: Get User Commission Rate for a symbol
+    private function getFuturesCommissionRate(string $symbol): PromiseInterface {
+        $endpoint = '/fapi/v1/commissionRate';
+        $params = ['symbol' => strtoupper($symbol)];
+        $signedRequestData = $this->createSignedRequestData($endpoint, $params, 'GET');
+        return $this->makeAsyncApiRequest('GET', $signedRequestData['url'], $signedRequestData['headers'])
+            ->then(function ($data) use ($symbol) {
+                if (!is_array($data) || !isset($data['symbol'], $data['makerCommissionRate'], $data['takerCommissionRate'])) {
+                    throw new \RuntimeException("Invalid commissionRate response for {$symbol}. Data: " . json_encode($data));
+                }
+                $makerRate = (float)$data['makerCommissionRate'];
+                $takerRate = (float)$data['takerCommissionRate'];
+                $this->logger->debug("Fetched commission rates for {$symbol}", ['maker' => $makerRate, 'taker' => $takerRate]);
+                return ['symbol' => $symbol, 'makerCommissionRate' => $makerRate, 'takerCommissionRate' => $takerRate];
             });
     }
 
@@ -1986,6 +2042,8 @@ class AiTradingBotFutures
             'trade_history' => $this->getFuturesTradeHistory($this->tradingSymbol, 20)
                                     ->then(fn($trades) => ['raw_binance_account_trades' => $trades])
                                     ->otherwise(fn($e) => ['error_fetch_trade_history' => substr($e->getMessage(),0,150), 'raw_binance_account_trades' => []]),
+            'commission_rates' => $this->getFuturesCommissionRate($this->tradingSymbol)
+                                      ->otherwise(fn($e) => ['error_fetch_commission_rates' => substr($e->getMessage(),0,150), 'makerCommissionRate' => 'ERROR', 'takerCommissionRate' => 'ERROR']),
         ];
 
         // Multi-Timeframe Kline Data Promises
@@ -2026,6 +2084,10 @@ class AiTradingBotFutures
                  $rawAccountTrades = ['error_fetch_trade_history' => $results['trade_history']['error_fetch_trade_history']];
              }
             $historicalKlinesMultiTfData = $results['historical_klines_all_intervals'] ?? [];
+            $commissionRates = $results['commission_rates'] ?? ['symbol' => $this->tradingSymbol, 'makerCommissionRate' => 'ERROR', 'takerCommissionRate' => 'ERROR'];
+            if(isset($results['commission_rates']['error_fetch_commission_rates'])) {
+                $commissionRates = ['error_fetch_commission_rates' => $results['commission_rates']['error_fetch_commission_rates']];
+            }
 
             // Bot Operational State
             $activeEntryOrderDetails = null;
@@ -2057,6 +2119,7 @@ class AiTradingBotFutures
                 'market_data' => [
                     'current_market_price_from_main_interval' => $this->lastClosedKlinePrice ?? 'N/A',
                     'historical_klines_multi_tf' => $historicalKlinesMultiTfData, // Full kline data
+                    'commission_rates' => $commissionRates, // Add commission rates here
                 ],
                 'account_state' => [
                     'current_margin_asset_balance_details' => $balanceForAI,
@@ -2131,6 +2194,7 @@ class AiTradingBotFutures
              'bot_metadata' => $fullDataForAI['bot_metadata'],
              'market_data' => [ // Renamed from market_data_summary for clarity
                 'current_market_price' => $fullDataForAI['market_data']['current_market_price_from_main_interval'],
+                'commission_rates' => $fullDataForAI['market_data']['commission_rates'], // Include commission rates
                 // This will now contain the actual kline arrays, limited to PROMPT_KLINES_LIMIT
                 'historical_klines_for_ai_detailed' => [],
              ],

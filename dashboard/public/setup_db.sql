@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS `orders_log` (
   `quantity_involved` decimal(20,8) DEFAULT NULL,
   `margin_asset` varchar(10) DEFAULT NULL,
   `realized_pnl_usdt` decimal(20,8) DEFAULT NULL,
+  `commission_usdt` decimal(20,8) DEFAULT NULL,
   `created_at_db` timestamp NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
