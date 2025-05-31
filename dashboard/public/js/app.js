@@ -127,9 +127,10 @@ function renderRecentTrades(orders) {
 
     orders.forEach(order => {
         const row = document.createElement('tr');
-        const pnlClass = order.realized_pnl_usdt > 0 ? 'text-emerald-400' : (order.realized_pnl_usdt < 0 ? 'text-red-400' : 'text-slate-300');
+        const netPnl = parseFloat(order.realized_pnl_usdt) - parseFloat(order.commission_usdt || 0);
+        const pnlClass = netPnl > 0 ? 'text-emerald-400' : (netPnl < 0 ? 'text-red-400' : 'text-slate-300');
         const sideClass = order.side === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400';
-        const pnlText = order.realized_pnl_usdt ? `$${parseFloat(order.realized_pnl_usdt).toFixed(2)}` : 'N/A';
+        const pnlText = netPnl ? `$${netPnl.toFixed(2)}` : 'N/A';
 
         row.innerHTML = `
             <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-100">${order.symbol}</td>

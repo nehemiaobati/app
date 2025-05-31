@@ -55,7 +55,7 @@ class DataController
     {
         try {
             $pdo = get_pdo();
-            $stmt = $pdo->prepare("SELECT order_id_binance, bot_event_timestamp_utc, symbol, side, status_reason, price_point, quantity_involved, realized_pnl_usdt FROM orders_log ORDER BY bot_event_timestamp_utc DESC LIMIT 10");
+            $stmt = $pdo->prepare("SELECT order_id_binance, bot_event_timestamp_utc, symbol, side, status_reason, price_point, quantity_involved, realized_pnl_usdt, commission_usdt FROM orders_log ORDER BY bot_event_timestamp_utc DESC LIMIT 10");
             $stmt->execute();
             $orders = $stmt->fetchAll();
 
@@ -100,7 +100,7 @@ class DataController
             // Total PnL
             $stmt = $pdo->query("
                 SELECT
-                    SUM(realized_pnl_usdt) AS total_pnl,
+                    SUM(realized_pnl_usdt - commission_usdt) AS total_pnl,
                     COUNT(CASE WHEN status_reason LIKE '%FILLED%' THEN 1 ELSE NULL END) AS total_trades,
                     SUM(CASE WHEN realized_pnl_usdt > 0 THEN 1 ELSE 0 END) AS winning_trades,
                     SUM(CASE WHEN realized_pnl_usdt < 0 THEN 1 ELSE 0 END) AS losing_trades,
