@@ -382,13 +382,14 @@ class AiTradingBotFutures
             'preferred_timeframes_for_entry' => ['1m', '5m', '15m'], // Default preferred timeframes for AI to focus on
             'key_sr_levels_to_watch' => ['support' => [], 'resistance' => []], // AI should populate
             'risk_parameters' => [
-                'target_risk_per_trade_usdt' => 5.0, // Default risk per trade
-                'default_rr_ratio' => 1.5,           // Default Reward/Risk ratio
-                'max_concurrent_positions' => 1,     // Max concurrent positions
-            ],
-            'entry_conditions_keywords' => ['momentum_confirm', 'breakout_consolidation'],
+                'target_risk_per_trade_usdt' => 0.3, // Default risk per trade
+                'default_rr_ratio' => 3,           // Default Reward/Risk ratio
+            'max_concurrent_positions' => 1,     // Max concurrent positions
+        ],
+        'quantity_determination_method' => 'INITIAL_MARGIN_TARGET', //  INITIAL_MARGIN_TARGET/AI_SUGGESTED' NEW FIELD: Determines how trade quantity is calculated
+        'entry_conditions_keywords' => ['momentum_confirm', 'breakout_consolidation'],
             'exit_conditions_keywords' => ['momentum_stall', 'target_profit_achieved'],
-            'leverage_preference' => ['min' => 5, 'max' => 20, 'preferred' => 10], // Default leverage preference
+            'leverage_preference' => ['min' => 5, 'max' => 10, 'preferred' => 10], // Default leverage preference
             'ai_confidence_threshold_for_trade' => 0.7, // Hypothetical: AI might internally use this
             'ai_learnings_notes' => 'Initial default strategy directives. AI to adapt based on market and trade outcomes.',
             'allow_ai_to_update_self' => true, // Flag if AI is permitted to suggest updates to this source
@@ -2215,6 +2216,9 @@ class AiTradingBotFutures
                 'recent_bot_order_logs_count' => count($fullDataForAI['historical_bot_performance_and_decisions']['recent_bot_order_log_outcomes_from_db'] ?? []),
                 'recent_ai_interactions_count' => count($fullDataForAI['historical_bot_performance_and_decisions']['recent_ai_interactions_from_db'] ?? []),
              ],
+             'bot_configuration_summary_for_ai' => [
+                'initialMarginTargetUsdtForAI' => $fullDataForAI['bot_configuration_summary_for_ai']['initialMarginTargetUsdtForAI'],
+             ],
         ];
 
         // Populate historical_klines_for_ai_detailed with a subset of raw kline data
@@ -2282,7 +2286,9 @@ class AiTradingBotFutures
 
         if (in_array('OPEN_POSITION', $possibleTradeActions)) {
             $actionList[] = "{$actionCounter}. OPEN_POSITION: `{\"action\": \"OPEN_POSITION\", \"leverage\": <int>, \"side\": \"BUY\"|\"SELL\", \"entryPrice\": <float>, \"quantity\": <float>, \"stopLossPrice\": <float>, \"takeProfitPrice\": <float>, \"trade_rationale\": \"<brief_justification_max_150_chars>\"}`\n" .
-                           "   - Parameters (leverage, risk/reward, preferred TFs) MUST adhere to `ACTIVE STRATEGY DIRECTIVES`. Calculate `quantity` using `initialMarginTargetUsdtForAI` and `leverage`.\n";
+                           "   - Parameters (leverage, risk/reward, preferred TFs) MUST adhere to `ACTIVE STRATEGY DIRECTIVES`.\n" .
+                           "   - If `quantity_determination_method` is `\"INITIAL_MARGIN_TARGET\"`,  calculate `quantity` using `initialMarginTargetUsdtForAI` (from `bot_configuration_summary_for_ai`), `leverage`, and `entryPrice`.\n" .
+                           "   - If `quantity_determination_method` is `\"AI_SUGGESTED\"`, provide the `quantity` directly.\n";
             $actionCounter++;
         }
         if (in_array('CLOSE_POSITION', $possibleTradeActions)) {
@@ -2307,6 +2313,7 @@ class AiTradingBotFutures
         if ($allowAIUpdate) {
             $promptText .= "\n**OPTIONAL: STRATEGY UPDATE SUGGESTION** (Include this field in your JSON response if you wish to update the strategy directives):\n";
             $promptText .= "`\"suggested_strategy_directives_update\": {\"updated_directives\": {<ENTIRE_new_strategy_directives_json_object>}, \"reason_for_update\": \"<explanation_of_change_max_200_chars>\"}`\n";
+            $promptText .= "   - Do Not Change existing quantity_determination_method.\n";
             $promptText .= "   - `updated_directives` MUST be the COMPLETE JSON object for the new strategy. Do NOT omit unchanged fields.\n";
             $promptText .= "   - Justify why the current `ACTIVE STRATEGY DIRECTIVES` are suboptimal for the `LIVE CONTEXT` and how your `updated_directives` improve the strategy.\n";
         }
