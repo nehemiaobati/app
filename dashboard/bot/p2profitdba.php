@@ -382,7 +382,7 @@ class AiTradingBotFutures
             'preferred_timeframes_for_entry' => ['1m', '5m', '15m'], // Default preferred timeframes for AI to focus on
             'key_sr_levels_to_watch' => ['support' => [], 'resistance' => []], // AI should populate
             'risk_parameters' => [
-                'target_risk_per_trade_usdt' => 0.3, // Default risk per trade
+                'target_risk_per_trade_usdt' => 0.5, // Default risk per trade
                 'default_rr_ratio' => 3,           // Default Reward/Risk ratio
             'max_concurrent_positions' => 1,     // Max concurrent positions
         ],
@@ -2241,90 +2241,81 @@ class AiTradingBotFutures
 
 
         // --- PROMPT TEXT CONSTRUCTION START ---
-        $promptText = "You are an autonomous trading AI for {$this->tradingSymbol} on Binance USDM Futures.\n";
-        $promptText .= "Your role is to analyze current market conditions, historical data, and bot operational state, then decide on an optimal trading action. You MUST adhere to the active trading strategy directives provided.\n";
-        $promptText .= "Your decisions will be logged and influence future actions. You can also suggest updates to your guiding strategy.\n\n";
+        $promptText = "You are an autonomous trading AI for {$this->tradingSymbol} on Binance USDM Futures. Your core task is to analyze market conditions and bot state, then provide ONE optimal trading action based on the ACTIVE STRATEGY DIRECTIVES.\n\n";
 
-        $promptText .= "**LIVE MARKET & BOT CONTEXT:**\n";
-        // Directly embed the $summarizedDataForPromptText which now includes detailed klines
+        $promptText .= "**LIVE MARKET & BOT CONTEXT (JSON):**\n";
         $promptText .= json_encode($summarizedDataForPromptText, JSON_PRETTY_PRINT | JSON_INVALID_UTF8_IGNORE | JSON_UNESCAPED_SLASHES) . "\n\n";
 
-        $promptText .= "=== ACTIVE STRATEGY DIRECTIVES (Your Guiding Source from Database) ===\n";
+        $promptText .= "=== ACTIVE STRATEGY DIRECTIVES (JSON - Your Guiding Rules) ===\n";
         $currentDirectives = $fullDataForAI['current_guiding_trade_logic_source']['strategy_directives'] ?? $this->getDefaultStrategyDirectives();
         $sourceInfo = $fullDataForAI['current_guiding_trade_logic_source']['source_details_from_db'] ?? ['name'=>'fallback', 'version'=>0, 'last_updated_by'=>'system', 'last_updated_at_utc'=>'N/A'];
 
-        $promptText .= "Source Name: {$sourceInfo['name']} (Version: {$sourceInfo['version']}, Last Updated By: {$sourceInfo['last_updated_by']} at {$sourceInfo['last_updated_at_utc']})\n";
-        $promptText .= "These directives define your current trading strategy. You MUST strictly adhere to these parameters for your trading decisions.\n";
+        $promptText .= "Source: {$sourceInfo['name']} (v{$sourceInfo['version']}) Last Updated: {$sourceInfo['last_updated_at_utc']} by {$sourceInfo['last_updated_by']}\n";
+        $promptText .= "You MUST strictly adhere to these directives for all trading decisions.\n";
         $promptText .= json_encode($currentDirectives, JSON_PRETTY_PRINT | JSON_INVALID_UTF8_IGNORE | JSON_UNESCAPED_SLASHES) . "\n\n";
-        $promptText .= "AI Learnings/Notes (from source): " . substr($currentDirectives['ai_learnings_notes'] ?? 'N/A', 0, 200) . "...\n\n";
+        $promptText .= "AI Learnings/Notes from Strategy: " . substr($currentDirectives['ai_learnings_notes'] ?? 'N/A', 0, 200) . "...\n\n";
 
-        $promptText .= "=== DECISION TASK ===\n";
-        $promptText .= "Based on the `LIVE MARKET & BOT CONTEXT`, and strictly following the `ACTIVE STRATEGY DIRECTIVES`, you must provide ONE primary action:\n";
+        $promptText .= "=== DECISION TASK: Choose ONE Primary Action ===\n";
 
         $possibleTradeActions = [];
-        // Logic to determine possible actions based on bot's operational state (unbiased, derived from flags)
+        $actionContext = "";
         if ($fullDataForAI['bot_operational_state']['position_missing_protective_orders_FLAG']) {
-            $promptText .= "CRITICAL STATE: Position is open but protective orders (SL/TP) are missing. Safety is paramount.\n";
-            $possibleTradeActions = ['CLOSE_POSITION']; // Only safe action in critical state
-            if (!empty(trim($currentDirectives['emergency_hold_justification'] ?? ''))) { // AI could pre-configure an emergency hold justification
+            $actionContext = "CRITICAL STATE: Position open, but protective orders (SL/TP) are missing. Safety is paramount.\n";
+            $possibleTradeActions = ['CLOSE_POSITION'];
+            if (!empty(trim($currentDirectives['emergency_hold_justification'] ?? ''))) {
                  $possibleTradeActions[] = 'HOLD_POSITION';
-                 $promptText .= "If emergency HOLD is chosen, it must be justified by: '{$currentDirectives['emergency_hold_justification']}'.\n";
+                 $actionContext .= "If HOLD is chosen, it must be justified by: '{$currentDirectives['emergency_hold_justification']}'.\n";
             }
         } elseif ($fullDataForAI['bot_operational_state']['active_pending_entry_order_details']) {
-            $promptText .= "Currently waiting for a pending entry order to fill.\n";
+            $actionContext = "Currently waiting for a pending entry order to fill.\n";
             $possibleTradeActions = ['HOLD_POSITION'];
         } elseif ($fullDataForAI['account_state']['current_position_details'] && !isset($fullDataForAI['account_state']['current_position_details']['error_fetch_position'])) {
-            $promptText .= "A position is currently open.\n";
+            $actionContext = "A position is currently open.\n";
             $possibleTradeActions = ['HOLD_POSITION', 'CLOSE_POSITION'];
         } else {
-            $promptText .= "No position is currently open, and no entry order is pending.\n";
+            $actionContext = "No position is currently open, and no entry order is pending.\n";
             $possibleTradeActions = ['OPEN_POSITION', 'DO_NOTHING'];
         }
+        $promptText .= $actionContext;
 
-        $promptText .= "\n**Choose ONE of the following primary actions:**\n";
-        $actionList = []; $actionCounter = 1;
+        $promptText .= "\n**Available Actions:**\n";
+        $actionList = [];
 
         if (in_array('OPEN_POSITION', $possibleTradeActions)) {
-            $actionList[] = "{$actionCounter}. OPEN_POSITION: `{\"action\": \"OPEN_POSITION\", \"leverage\": <int>, \"side\": \"BUY\"|\"SELL\", \"entryPrice\": <float>, \"quantity\": <float>, \"stopLossPrice\": <float>, \"takeProfitPrice\": <float>, \"trade_rationale\": \"<brief_justification_max_150_chars>\"}`\n" .
-                           "   - Parameters (leverage, risk/reward, preferred TFs) MUST adhere to `ACTIVE STRATEGY DIRECTIVES`.\n" .
-                           "   - If `quantity_determination_method` is `\"INITIAL_MARGIN_TARGET\"`,  calculate `quantity` using `initialMarginTargetUsdtForAI` (from `bot_configuration_summary_for_ai`), `leverage`, and `entryPrice`.\n" .
-                           "   - If `quantity_determination_method` is `\"AI_SUGGESTED\"`, provide the `quantity` directly.\n";
-            $actionCounter++;
+            $actionList[] = "- OPEN_POSITION: `{\"action\": \"OPEN_POSITION\", \"leverage\": <int>, \"side\": \"BUY\"|\"SELL\", \"entryPrice\": <float>, \"quantity\": <float>, \"stopLossPrice\": <float>, \"takeProfitPrice\": <float>, \"trade_rationale\": \"<brief_justification_max_150_chars>\"}`\n" .
+                           "  *   `leverage`, `stopLossPrice`, `takeProfitPrice` MUST adhere to `ACTIVE STRATEGY DIRECTIVES` (risk/reward, leverage preference).\n" .
+                           "  *   `quantity`: If `quantity_determination_method` is `\"INITIAL_MARGIN_TARGET\"`, provide `leverage` and `entryPrice` (bot calculates quantity). If `\"AI_SUGGESTED\"`, you MUST provide `quantity` directly.\n";
         }
         if (in_array('CLOSE_POSITION', $possibleTradeActions)) {
-            $actionList[] = "{$actionCounter}. CLOSE_POSITION: `{\"action\": \"CLOSE_POSITION\", \"reason\": \"<brief_justification_max_100_chars>\"}`\n" .
-                           "   - Use if strategy dictates exiting, momentum lost, or critical state.\n";
-            $actionCounter++;
+            $actionList[] = "- CLOSE_POSITION: `{\"action\": \"CLOSE_POSITION\", \"reason\": \"<brief_justification_max_100_chars>\"}`\n" .
+                           "  *   Use to exit current position (e.g., strategy dictates, momentum lost, critical state).\n";
         }
         if (in_array('HOLD_POSITION', $possibleTradeActions)) {
-            $actionList[] = "{$actionCounter}. HOLD_POSITION: `{\"action\": \"HOLD_POSITION\", \"reason\": \"<brief_justification_max_100_chars>\"}`\n" .
-                           "   - Use if current state aligns with strategy to hold or wait for fill.\n";
-            $actionCounter++;
+            $actionList[] = "- HOLD_POSITION: `{\"action\": \"HOLD_POSITION\", \"reason\": \"<brief_justification_max_100_chars>\"}`\n" .
+                           "  *   Use to maintain current state (e.g., waiting for fill, market consolidation).\n";
         }
         if (in_array('DO_NOTHING', $possibleTradeActions)) {
-            $actionList[] = "{$actionCounter}. DO_NOTHING: `{\"action\": \"DO_NOTHING\", \"reason\": \"<brief_justification_max_100_chars>\"}`\n" .
-                           "   - Use if no suitable trade opportunity per strategy.\n";
-            $actionCounter++;
+            $actionList[] = "- DO_NOTHING: `{\"action\": \"DO_NOTHING\", \"reason\": \"<brief_justification_max_100_chars>\"}`\n" .
+                           "  *   Use if no suitable trade opportunity or action is required.\n";
         }
         $promptText .= implode("\n", $actionList);
 
         // Optional: Suggest strategy updates
         $allowAIUpdate = ($currentDirectives['allow_ai_to_update_self'] ?? false) === true;
         if ($allowAIUpdate) {
-            $promptText .= "\n**OPTIONAL: STRATEGY UPDATE SUGGESTION** (Include this field in your JSON response if you wish to update the strategy directives):\n";
-            $promptText .= "`\"suggested_strategy_directives_update\": {\"updated_directives\": {<ENTIRE_new_strategy_directives_json_object>}, \"reason_for_update\": \"<explanation_of_change_max_200_chars>\"}`\n";
-            $promptText .= "   - Do Not Change existing quantity_determination_method.\n";
-            $promptText .= "   - `updated_directives` MUST be the COMPLETE JSON object for the new strategy. Do NOT omit unchanged fields.\n";
-            $promptText .= "   - Justify why the current `ACTIVE STRATEGY DIRECTIVES` are suboptimal for the `LIVE CONTEXT` and how your `updated_directives` improve the strategy.\n";
+            $promptText .= "\n**OPTIONAL: STRATEGY UPDATE SUGGESTION** (Include this field in your JSON response if applicable):\n";
+            $promptText .= "`\"suggested_strategy_directives_update\": {\"updated_directives\": {<COMPLETE_new_strategy_directives_json_object>}, \"reason_for_update\": \"<explanation_of_change_max_200_chars>\"}`\n";
+            $promptText .= "  *   `updated_directives` MUST be the COMPLETE JSON object for the new strategy. Do NOT omit unchanged fields.\n";
+            $promptText .= "  *   Justify why the current `ACTIVE STRATEGY DIRECTIVES` are suboptimal and how your `updated_directives` improve the strategy.\n";
         }
 
         $promptText .= "\n=== MANDATORY OUTPUT RULES ===\n";
-        $promptText .= "- Your entire response MUST be a single JSON object. No markdown, no extra text.\n";
-        $promptText .= "- It MUST contain a top-level `action` field with one of the primary actions defined above.\n";
-        $promptText .= "- Parameters for `OPEN_POSITION` (leverage, quantities, prices) MUST be calculated to adhere to the `risk_parameters` (target USDT risk, R/R) and `leverage_preference` from the `ACTIVE STRATEGY DIRECTIVES`.\n";
-        $promptText .= "- If `suggested_strategy_directives_update` is included, its `updated_directives` field MUST be the COMPLETE JSON structure of the new strategy directives. Do NOT provide partial updates.\n";
-        $promptText .= "- Ensure numerical values are correctly formatted (floats).\n";
-        $promptText .= "- Critical State (`position_missing_protective_orders_FLAG`): Prioritize capital preservation. If trade cannot be closed safely, justify HOLD_POSITION extremely cautiously.\n";
+        $promptText .= "1.  Your ENTIRE response MUST be a single JSON object. NO markdown, NO extra text, NO conversational phrases outside this JSON.\n";
+        $promptText .= "2.  It MUST contain a top-level `action` field with one of the primary actions defined above.\n";
+        $promptText .= "3.  `OPEN_POSITION` parameters (`leverage`, `quantity`, `entryPrice`, `stopLossPrice`, `takeProfitPrice`) MUST be calculated to adhere to `risk_parameters` and `leverage_preference` from `ACTIVE STRATEGY DIRECTIVES`.\n";
+        $promptText .= "4.  If `suggested_strategy_directives_update` is included, its `updated_directives` field MUST be the COMPLETE JSON structure of the new strategy directives.\n";
+        $promptText .= "5.  Ensure all numerical values are correctly formatted as floats.\n";
+        $promptText .= "6.  In CRITICAL STATE (`position_missing_protective_orders_FLAG`), prioritize capital preservation. If a trade cannot be closed safely, justify `HOLD_POSITION` extremely cautiously.\n";
         $promptText .= "\nProvide ONLY the JSON object for your decision.";
 
         $generationConfig = [
@@ -2592,7 +2583,32 @@ class AiTradingBotFutures
                 $this->aiSuggestedLeverage = (int)($decision['leverage'] ?? ($currentDirectives['leverage_preference']['preferred'] ?? $this->defaultLeverage));
                 $this->aiSuggestedSide = strtoupper($decision['side'] ?? '');
                 $this->aiSuggestedEntryPrice = (float)($decision['entryPrice'] ?? 0);
-                $this->aiSuggestedQuantity = (float)($decision['quantity'] ?? 0); // AI should calculate this based on margin target
+                $quantityDeterminationMethod = $currentDirectives['quantity_determination_method'] ?? 'AI_SUGGESTED';
+
+                if ($quantityDeterminationMethod === 'INITIAL_MARGIN_TARGET') {
+                    $initialMarginTarget = $this->initialMarginTargetUsdt;
+                    $leverage = (int)($decision['leverage'] ?? ($currentDirectives['leverage_preference']['preferred'] ?? $this->defaultLeverage));
+                    $entryPrice = (float)($decision['entryPrice'] ?? 0);
+
+                    if ($initialMarginTarget <= 0 || $entryPrice <= 0 || $leverage <= 0) {
+                        $validationError = "Cannot calculate quantity for INITIAL_MARGIN_TARGET: initialMarginTargetUsdt ({$initialMarginTarget}), leverage ({$leverage}), or entryPrice ({$entryPrice}) is invalid.";
+                        $this->logger->error("AI OPEN_POSITION parameters FAILED BOT VALIDATION: {$validationError}", ['failed_decision_params' => $decision]);
+                        $this->lastAIDecisionResult = ['status' => 'ERROR_VALIDATION', 'message' => "AI OPEN_POSITION params rejected by bot: " . $validationError, 'invalid_decision_by_ai' => $decision];
+                        $logActionForDB = 'ERROR_VALIDATION_OPEN_POS';
+                        break; // Exit the switch case
+                    }
+
+                    $calculatedQuantity = ($initialMarginTarget * $leverage) / $entryPrice;
+                    $this->aiSuggestedQuantity = $calculatedQuantity;
+                    $this->logger->info("Quantity calculated by bot using INITIAL_MARGIN_TARGET method.", [
+                        'initial_margin_target' => $initialMarginTarget,
+                        'leverage' => $leverage,
+                        'entry_price' => $entryPrice,
+                        'calculated_quantity' => $calculatedQuantity
+                    ]);
+                } else {
+                    $this->aiSuggestedQuantity = (float)($decision['quantity'] ?? 0); // AI should calculate this based on margin target
+                }
                 $this->aiSuggestedSlPrice = (float)($decision['stopLossPrice'] ?? 0); // AI must calculate this for target risk
                 $this->aiSuggestedTpPrice = (float)($decision['takeProfitPrice'] ?? 0); // AI calculates based on R/R
                 $tradeRationale = trim($decision['trade_rationale'] ?? '');
